@@ -62,6 +62,16 @@ local function Resolve(entry)
         pcall(s.open)
         f = Lookup(s)
     end
+    if not f and s.frame then
+        -- the addon's own way of opening it didn't produce the window: try the
+        -- way the hub's built-in entry knows
+        local own = NS.BuiltinSpec(entry.name)
+        local b = own and own.settings
+        if b and b ~= s and b.open then
+            pcall(b.open)
+            f = Lookup(s) or Lookup(b)
+        end
+    end
     return f
 end
 

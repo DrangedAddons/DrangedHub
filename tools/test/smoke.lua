@@ -122,6 +122,7 @@ Check(not hub:IsShown(), "/dranged again closes it")
 -- hosted window
 SlashCmdList.DRANGEDHUB("castcount")
 Check(hub:IsShown() and ccWin and ccWin:IsVisible(), "/dranged castcount shows CastCount's settings")
+Check(NS.Spec(NS.byName.CastCount) ~= NS.BuiltinSpec("CastCount"), "(CastCount is described by its .toc here, with an Open command that can't run: the built-in opener stepped in)")
 Check(ccWin:GetParent() ~= UIParent, "CastCount window moved into the hub")
 Check(ccWin.backdropInfo == nil, "its backdrop is off")
 Check(not CC_X:IsShown(), "its close X is hidden")
@@ -178,6 +179,21 @@ spec.actions[2][2]()
 Check(TOC_SLASH == "preview", "a .toc action runs its slash command")
 SlashCmdList.DRANGEDHUB("overview")
 Check(hub:GetWidth() == normalW, "back to the normal width on another page")
+
+-- commands: found through the SLASH_ globals, or typed into the chat box when even that fails
+Check(next(SlashCmdList) == nil, "(the mock's command list can't be walked, like the client's)")
+Check(NS.RunSlash("/TocAddon  preview ") == true and TOC_SLASH == "preview", "a command is found without walking the list")
+SLASH_LATECOMER1 = "/latecomer"
+SlashCmdList.LATECOMER = function(msg) LATE = msg end
+Check(NS.RunSlash("/latecomer hi") == true and LATE == "hi", "a command registered after the first lookup is found")
+ChatFrame1EditBox = CreateFrame("EditBox")
+ChatFrame1EditBox:SetText("half a whisper")
+function ChatEdit_SendText(box) TYPED = box:GetText() end
+Check(NS.RunSlash("/onlytyped now") == true and TYPED == "/onlytyped now", "an unknown command goes through the chat box")
+Check(ChatFrame1EditBox:GetText() == "half a whisper", "and what the player was typing is put back")
+ChatEdit_SendText, ChatFrame1EditBox = nil, nil
+local printedSlash = #PRINTED
+Check(NS.RunSlash("/nosuch") == false and NS.RunSlash("/nosuch") == false and #PRINTED == printedSlash + 1, "a command nothing can run says so once")
 
 -- an addon described in Lua before the hub loaded
 LUA_SHOWN = 0

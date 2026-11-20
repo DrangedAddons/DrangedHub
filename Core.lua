@@ -95,6 +95,11 @@ function NS.Builtin(spec)
     builtin[spec.name] = spec
 end
 
+-- The hub's own entry for an addon, whatever the addon says about itself.
+function NS.BuiltinSpec(name)
+    return builtin[name]
+end
+
 local function Meta(name, field)
     local v = GetMeta(name, "X-DrangedHub-" .. field)
     if type(v) ~= "string" then return nil end
@@ -103,24 +108,81 @@ local function Meta(name, field)
     return v
 end
 
+-- Slash commands, read from the SLASH_<KEY>n globals. SlashCmdList itself is
+-- only ever indexed by key: on this client walking it with pairs() finds none
+-- of the addons' commands.
+local slashMap    -- KEY -> { "/cmd", ... }
+local slashKey    -- "/cmd" (lower case) -> KEY
+
+local function ReadSlashes()
+    slashMap, slashKey = {}, {}
+    for k, v in pairs(_G) do
+        if type(k) == "string" and type(v) == "string" then
+            local key = k:match("^SLASH_(.-)%d+$")
+            if key then
+                slashMap[key] = slashMap[key] or {}
+                table.insert(slashMap[key], v)
+                slashKey[v:lower()] = key
+            end
+        end
+    end
+end
+
+-- The function behind a command, or nil.
+local function SlashHandler(cmd)
+    -- the game's own lookup table, where the client leaves it reachable
+    local hash = rawget(_G, "hash_SlashCmdList")
+    if type(hash) == "table" then
+        local fn = hash[cmd:upper()]
+        if type(fn) == "function" then return fn end
+    end
+    for pass = 1, 2 do
+        if not slashKey or pass == 2 then ReadSlashes() end   -- second pass: an addon loaded since
+        local key = slashKey[cmd]
+        local fn = key and SlashCmdList[key]
+        if type(fn) == "function" then return fn end
+    end
+    return nil
+end
+
+-- Last resort: put the text through the chat box, which is what typing it does.
+local function TypeSlash(text)
+    local box = (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow()) or ChatFrame1EditBox
+        or (DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox)
+    if not (box and box.SetText and box.GetText) then return false end
+    local send
+    if type(ChatEdit_SendText) == "function" then
+        send = function() ChatEdit_SendText(box, 0) end
+    elseif type(box.SendText) == "function" then
+        send = function() box:SendText() end
+    else
+        return false
+    end
+    local typed = box:GetText()
+    box:SetText(text)
+    local ok = pcall(send)
+    box:SetText(typed or "")   -- whatever the player was in the middle of typing
+    return ok
+end
+
 -- Runs a slash command given as text ("/myaddon config"), as if typed.
+-- Returns false when nothing could run it.
+local slashFailed = {}
+
 function NS.RunSlash(text)
     local cmd, rest = tostring(text):match("^%s*(/%S+)%s*(.-)%s*$")
     if not cmd then return false end
     cmd = cmd:lower()
-    for key, fn in pairs(SlashCmdList) do
-        local i = 1
-        while true do
-            local slash = _G["SLASH_" .. key .. i]
-            if type(slash) ~= "string" then break end
-            if slash:lower() == cmd then
-                fn(rest)
-                return true
-            end
-            i = i + 1
-        end
+    local fn = SlashHandler(cmd)
+    if fn then
+        fn(rest)
+        return true
     end
-    NS.Print("no command " .. cmd .. " (is the addon loaded?)")
+    if TypeSlash(cmd .. (rest ~= "" and (" " .. rest) or "")) then return true end
+    if not slashFailed[cmd] then
+        slashFailed[cmd] = true
+        NS.Print("couldn't run " .. cmd .. ".")
+    end
     return false
 end
 
@@ -296,21 +358,8 @@ end
 ---------------------------------------------------------
 -- Every /command whose SLASH_ key starts with the addon's name, e.g.
 -- SLASH_CRATECOSTWRITS1 for CrateCost. Read from the globals once.
-local slashMap
-
 function NS.Commands(entry)
-    if not slashMap then
-        slashMap = {}
-        for k, v in pairs(_G) do
-            if type(k) == "string" and type(v) == "string" then
-                local key = k:match("^SLASH_(.-)%d+$")
-                if key then
-                    slashMap[key] = slashMap[key] or {}
-                    table.insert(slashMap[key], v)
-                end
-            end
-        end
-    end
+    if not slashMap then ReadSlashes() end
     local up = entry.name:upper()
     local out, seen = {}, {}
     for key, cmds in pairs(slashMap) do

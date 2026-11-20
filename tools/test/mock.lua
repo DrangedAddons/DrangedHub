@@ -237,7 +237,12 @@ SettingsPanel = NewObj("Frame", "SettingsPanel", UIParent)
 SettingsPanel._shown = false
 GameFontHighlight = NewObj("Font")
 UISpecialFrames = {}
-SlashCmdList = {}
+-- Like the client: commands can be set and looked up by key, but walking the
+-- list with pairs() finds nothing.
+do
+    local store = {}
+    SlashCmdList = setmetatable({}, { __index = store, __newindex = store })
+end
 CLOSE = "Close"
 tinsert = table.insert
 function strtrim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
@@ -290,7 +295,9 @@ DBI = dbi
 
 -- Addon list
 ADDONS = {
-    { "CastCount", "CastCount", "Casts left", { Author = "Dranged", Version = "3.0.0", IconTexture = "Interface\\Icons\\X", ["X-DrangedAddons-Games"] = "_forever_" }, true },
+    { "CastCount", "CastCount", "Casts left", { Author = "Dranged", Version = "3.0.0", IconTexture = "Interface\\Icons\\X", ["X-DrangedAddons-Games"] = "_forever_",
+        -- its .toc names a command the mock can't run: the hub has to fall back to its built-in opener
+        ["X-DrangedHub-Frame"] = "CastCountConfig", ["X-DrangedHub-Open"] = "/castcount", ["X-DrangedHub-Crop"] = "34" }, true },
     { "CraftRoute", "CraftRoute", "Routes", { Author = "Dranged + Lexible", Version = "1.17.2" }, true },
     { "DrangedHub", "DrangedAddons", "Hub", { Author = "Dranged", Version = "0.1.0" }, true },
     { "EscortReady", "EscortReady", "Escort", { Author = "Dranged", Version = "0.13.0" }, true },

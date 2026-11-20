@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+- **Fixed:** addons whose `.toc` opens their settings with a slash command (AuctionatorSync, CastCount, ConfuciusSay, CrateCost, GroupHost, HoTForecast, ShoppingDock, ZoneStyle) showed "settings open in their own window" and chat said "no command /async (is the addon loaded?)". The hub looked commands up by walking the game's command list, which finds nothing on this client. Commands are now found through their `SLASH_` names, and typed into the chat box if that fails too.
+- If an addon's own way of opening its settings doesn't produce the window, the hub tries the way its built-in entry knows before giving up.
+- A command that can't be run is reported once, not on every click.
+
 ## 0.2.1
 - **Fixed:** in 0.2.0 an Options page (EscortReady) came up empty and stayed empty. Pages are now held the way the game's own Options window holds them: pinned to both corners of a holder that the hub sizes, instead of being given a size and re-placed.
 - The hub no longer re-anchors or resizes a hosted window from inside a size or show handler. Those only flag that a layout is needed, and the layout runs from the hub's own update, at most once a frame.
