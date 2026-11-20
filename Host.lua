@@ -235,86 +235,112 @@ local function Viewport()
     return w, h
 end
 
--- An Options page fills the pane, and is bigger when its contents need it.
-local function SizePage(rec)
-    local vw, vh = Viewport()
-    rec.frame:SetSize(math.max(vw, rec.needW or 0), math.max(vh, rec.needH or 0))
-end
+---------------------------------------------------------
+--  SECTION: Placing
+---------------------------------------------------------
+-- Rule for this file: nothing here changes a frame's anchors, size or shown
+-- state from inside a size or show handler. Those handlers only tell the hub
+-- to lay out again, and the hub does that from its own OnUpdate. Re-anchoring
+-- a page while the game is in the middle of laying it out leaves parts of it
+-- undrawn.
+
+-- A hub-made show or hide isn't "the addon opened/closed its window".
+local function Enter(rec) rec.internal = (rec.internal or 0) + 1 end
+local function Leave(rec) rec.internal = math.max(0, (rec.internal or 0) - 1) end
+local function Internal(rec) return (rec.internal or 0) > 0 end
 
 local function Place(rec)
     local f, holder = rec.frame, rec.holder
     if f:GetParent() ~= holder then f:SetParent(holder) end
     f:ClearAllPoints()
-    f:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, rec.crop)
-    if rec.page then SizePage(rec) end
+    if rec.page then
+        -- The way the game's Options window holds a page: pinned to both
+        -- corners of a holder, and the holder is what gets a size.
+        f:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+        f:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", 0, 0)
+    else
+        f:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, rec.crop)
+    end
     f:SetFrameStrata(holder:GetFrameStrata())
     f:SetFrameLevel(holder:GetFrameLevel() + 1)
     Strip(rec)
 end
 
--- Re-reads what the contents need. Returns true when something changed.
-local function Measure(rec)
-    if rec.frozen then return false end
-    local changed = false
+-- Has the addon (or the game's Options window) moved the frame elsewhere?
+local function Displaced(rec)
+    local f = rec.frame
+    if f:GetParent() ~= rec.holder then return true end
+    local _, rel = f:GetPoint(1)
+    return rel ~= rec.holder
+end
+
+-- The size the hub's pane has to give this window or page, and the width
+-- worth widening the hub for. Only reads, apart from a measured title crop.
+function Host.Need(rec)
+    local f = rec.frame
+    local s = f:GetScale() or 1
     if rec.page then
-        local ok, w, h = pcall(Extent, rec.frame)
-        if ok and w and h then
-            if math.abs(w - (rec.needW or 0)) > 2 or math.abs(h - (rec.needH or 0)) > 2 then
+        if not rec.frozen then
+            local ok, w, h = pcall(Extent, f)
+            if ok and w and h then
                 -- contents that keep growing with the page would never settle: stop following them
                 if rec.needH and h > rec.needH + 2 then rec.grew = (rec.grew or 0) + 1 else rec.grew = 0 end
                 if rec.grew > 8 then
                     rec.frozen = true
-                    return false
+                else
+                    rec.needW, rec.needH = w, h
                 end
-                rec.needW, rec.needH = w, h
-                SizePage(rec)
-                changed = true
             end
         end
-    elseif rec.autoCrop and rec.hadTitle and (rec.cropLooks or 0) < 4 then
+        local vw, vh = Viewport()
+        return math.max(vw, (rec.needW or 0) * s), math.max(vh, (rec.needH or 0) * s), (rec.needW or 0) * s
+    end
+    if rec.autoCrop and rec.hadTitle and (rec.cropLooks or 0) < 4 then
         -- only while the window settles after being shown: contents that move
         -- later (a list scrolling under the title) mustn't shift the crop
         rec.cropLooks = (rec.cropLooks or 0) + 1
         local ok, gap = pcall(TitleGap, rec)
         if ok and gap and gap ~= rec.crop then
             rec.crop = gap
-            rec.frame:ClearAllPoints()
-            rec.frame:SetPoint("TOPLEFT", rec.holder, "TOPLEFT", 0, gap)
-            changed = true
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", rec.holder, "TOPLEFT", 0, gap)
         end
     end
-    return changed
+    local w = (f:GetWidth() or 0) * s
+    local h = ((f:GetHeight() or 0) - rec.crop) * s
+    return math.max(50, w), math.max(50, h), w
 end
 
 ---------------------------------------------------------
 --  SECTION: When the addon shows or hides its window itself
 ---------------------------------------------------------
 local function OnShown(rec)
-    if rec.internal or not rec.holder then return end
+    if Internal(rec) or not rec.holder then return end
     if NS.OpenTo then NS.OpenTo(rec.entry.name) end
     if rec.page then
         -- the game's Options window just took the page back: put it here again
         C_Timer.After(0, function()
             if not rec.holder then return end
+            Enter(rec)
             pcall(Place, rec)
             -- closing the Options window may hide the page: that isn't the addon closing it
-            rec.internal = true
             if SettingsPanel and SettingsPanel:IsShown() and not InCombatLockdown() then
                 pcall(HideUIPanel, SettingsPanel)
             end
             if not rec.frame:IsShown() then pcall(rec.frame.Show, rec.frame) end
-            rec.internal = false
+            Leave(rec)
+            if NS.OnHostedResize then NS.OnHostedResize(rec) end
         end)
     end
 end
 
 local function OnHidden(rec)
-    if rec.internal or not rec.holder then return end
+    if Internal(rec) or not rec.holder then return end
     if NS.IsShowing and NS.IsShowing(rec.entry) then NS.Close() end
 end
 
 local function Adopt(entry, f)
-    local rec = { entry = entry, frame = f, crop = 0, fresh = true }
+    local rec = { entry = entry, frame = f, crop = 0, fresh = true, internal = 0 }
     byFrame[f] = rec
     byName[entry.name] = rec
 
@@ -323,9 +349,12 @@ local function Adopt(entry, f)
     hooksecurefunc(f, "SetShown", function(_, on)
         if on then OnShown(rec) else OnHidden(rec) end
     end)
-    -- the addon re-themes or re-places its window when it shows
+    -- the addon may re-place its window when it shows; the hub puts it back on its next update
     f:HookScript("OnShow", function()
-        if rec.holder then pcall(Place, rec) end
+        if rec.holder and NS.OnHostedResize then
+            rec.check = true
+            NS.OnHostedResize(rec)
+        end
     end)
     f:HookScript("OnSizeChanged", function()
         if rec.holder and NS.OnHostedResize then NS.OnHostedResize(rec) end
@@ -348,15 +377,6 @@ local function Adopt(entry, f)
             end
         end)
     end
-    -- keep following the contents while the page is on show: sections open,
-    -- lists fill, a new version adds options
-    local wait = 0
-    f:HookScript("OnUpdate", function(_, elapsed)
-        wait = wait + (elapsed or 0)
-        if wait < 0.4 then return end
-        wait = 0
-        if rec.holder and Measure(rec) and NS.OnHostedResize then NS.OnHostedResize(rec) end
-    end)
     return rec
 end
 
@@ -381,18 +401,13 @@ function Host.Attach(entry, holder)
     elseif rec.page then
         rec.crop = 0
     end
-    rec.frozen, rec.grew, rec.cropLooks = false, 0, 0
-    rec.internal = true
+    rec.frozen, rec.grew, rec.cropLooks, rec.check = false, 0, 0, false
+    Enter(rec)
     local ok, err = pcall(function()
-        -- Fonts first. Changing a font after the page is laid out moves the
-        -- text, and what's anchored under it can be left undrawn.
-        if NS.NoteThemeFonts then NS.NoteThemeFonts(f) end
         Place(rec)
-        if rec.page and f:IsShown() then f:Hide() end   -- so its OnShow builds the page
-        f:Show()
-        Measure(rec)
+        if not f:IsShown() then f:Show() end
     end)
-    rec.internal = false
+    Leave(rec)
     if not ok then
         if not rec.warned then
             rec.warned = true
@@ -413,19 +428,81 @@ end
 function Host.Park(entry)
     local rec = byName[entry.name]
     if not rec or not rec.holder then return end
-    rec.internal = true
+    Enter(rec)
     pcall(rec.frame.Hide, rec.frame)
-    rec.internal = false
+    Leave(rec)
 end
 
--- The pane changed size or scale: fit the hosted window to it again.
-function Host.Refit(entry)
-    local rec = byName[entry.name]
-    if not rec or not rec.holder or not rec.frame:IsShown() then return end
-    rec.internal = true
-    pcall(function()
-        Place(rec)
-        Measure(rec)
-    end)
-    rec.internal = false
+-- Puts the frame back in its holder. force: always; otherwise only when the
+-- addon moved it since the hub last looked.
+function Host.Replace(rec, force)
+    if not rec.holder then return end
+    local need = force or (rec.check and Displaced(rec))
+    rec.check = false
+    if not need then return end
+    Enter(rec)
+    pcall(Place, rec)
+    Leave(rec)
+end
+
+---------------------------------------------------------
+--  SECTION: Checking what the game drew
+---------------------------------------------------------
+-- Counts what is on show in the hosted frame and what has no place on screen:
+-- shown and anchored, but the game has no rectangle for it, so it isn't
+-- drawn. (Templates carry spare textures with no anchor at all; those don't count.)
+local function Census(f)
+    local shown, lost = 0, 0
+    local function Walk(obj, depth)
+        if obj.IsShown and not obj:IsShown() then return end
+        shown = shown + 1
+        if obj.GetNumPoints and (obj:GetNumPoints() or 0) > 0 and not (obj:GetLeft() and obj:GetTop()) then
+            lost = lost + 1
+        end
+        if depth < 2 and obj.GetChildren then
+            for _, child in ipairs({ obj:GetChildren() }) do Walk(child, depth + 1) end
+            for _, region in ipairs({ obj:GetRegions() }) do Walk(region, depth + 1) end
+        end
+    end
+    for _, child in ipairs({ f:GetChildren() }) do Walk(child, 1) end
+    for _, region in ipairs({ f:GetRegions() }) do Walk(region, 1) end
+    return shown, lost
+end
+
+-- How much of the hosted frame the game hasn't placed: 0 when it's all there,
+-- -1 when the frame itself isn't on show.
+function Host.Lost(rec)
+    local f = rec.frame
+    if not f:IsVisible() or not f:GetLeft() then return -1 end
+    local ok, _, lost = pcall(Census, f)
+    return ok and lost or 0
+end
+
+-- Lines for /dranged debug.
+function Host.Describe(rec)
+    local f = rec.frame
+    local function N(v) return v and ("%.0f"):format(v) or "nil" end
+    local lines = {}
+    lines[#lines + 1] = ("%s: %s, crop %s, needs %sx%s, internal %s, reshown %s"):format(
+        rec.entry.name, rec.page and "page" or "window", tostring(rec.crop), N(rec.needW), N(rec.needH),
+        tostring(rec.internal), tostring(rec.reshown or 0))
+    lines[#lines + 1] = ("frame: shown %s, visible %s, in holder %s, size %sx%s, left %s top %s, scale %.2f, alpha %.2f, level %s"):format(
+        tostring(f:IsShown()), tostring(f:IsVisible()), tostring(f:GetParent() == rec.holder),
+        N(f:GetWidth()), N(f:GetHeight()), N(f:GetLeft()), N(f:GetTop()),
+        f:GetEffectiveScale() or 0, f:GetAlpha() or 0, tostring(f:GetFrameLevel()))
+    for i = 1, math.min(2, f:GetNumPoints() or 0) do
+        local point, rel, relPoint, x, y = f:GetPoint(i)
+        lines[#lines + 1] = ("point %d: %s to %s %s, %s, %s"):format(i, tostring(point),
+            rel == rec.holder and "holder" or tostring(rel and rel.GetName and rel:GetName() or rel), tostring(relPoint), N(x), N(y))
+    end
+    local h = rec.holder
+    lines[#lines + 1] = ("holder: size %sx%s, left %s top %s, visible %s"):format(
+        N(h:GetWidth()), N(h:GetHeight()), N(h:GetLeft()), N(h:GetTop()), tostring(h:IsVisible()))
+    local ok, shown, lost = pcall(Census, f)
+    if ok then
+        lines[#lines + 1] = ("inside: %d things on show, %d without a place on screen"):format(shown, lost)
+    else
+        lines[#lines + 1] = "inside: couldn't count (" .. tostring(shown) .. ")"
+    end
+    return lines
 end

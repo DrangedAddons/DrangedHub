@@ -123,6 +123,7 @@ function UI.ScrollBox(parent)
     content:SetSize(10, 10)
     sf:SetScrollChild(content)
     sf.contentW, sf.contentH = 10, 10
+    sf.hasX = false
 
     local function Bar()
         local track = CreateFrame("Frame", nil, parent)
@@ -161,6 +162,7 @@ function UI.ScrollBox(parent)
         end
         local maxY, maxX = MaxY(), MaxX()
         if (self:GetVerticalScroll() or 0) > maxY then self:SetVerticalScroll(maxY) end
+        -- sideways scrolling is left alone entirely until something is too wide
         if (self:GetHorizontalScroll() or 0) > maxX then self:SetHorizontalScroll(maxX) end
 
         vbar:SetShown(maxY > 0.5)
@@ -186,7 +188,8 @@ function UI.ScrollBox(parent)
         self:UpdateBars()
     end
     function sf:ScrollToX(x)
-        self:SetHorizontalScroll(Clamp(x, MaxX()))
+        x = Clamp(x, MaxX())
+        if x ~= (self:GetHorizontalScroll() or 0) then self:SetHorizontalScroll(x) end
         self:UpdateBars()
     end
     function sf:SetContentSize(w, h)
@@ -206,9 +209,10 @@ function UI.ScrollBox(parent)
             self:ScrollTo((self:GetVerticalScroll() or 0) - delta * 40)
         end
     end)
+    -- With an owner listening, a size change only tells the owner, who lays
+    -- out again from its own update: nothing is re-anchored from in here.
     sf:SetScript("OnSizeChanged", function(self)
-        self:UpdateBars()
-        if self.onViewport then self.onViewport() end
+        if self.onViewport then self.onViewport() else self:UpdateBars() end
     end)
 
     local function DragY()

@@ -86,6 +86,7 @@ DrangedHubSpecs.MyAddon = {
 
 ## Development
 - `tools/make_icon.py` builds `logo.tga`, `icon.tga` and `icon.ico` from `tools/penrose.png`.
+- `/dranged debug` prints the state of the page on show.
 - `tools/test/run.py` loads the addon against a mock of the WoW frame API and runs `smoke.lua` in four looks. It needs `lupa` (`pip install lupa`).
 - `Theme.lua`, `Widgets.lua` and `Window.lua` are the shared Dranged UI kit, copied in unchanged.
 

@@ -59,8 +59,7 @@ end
 
 -- LuaAddon: loads before the hub and describes itself with a table. Its page has a
 -- background that fills it and two buttons pinned to its bottom edge.
-local luaPage = CreateFrame("Frame")
-luaPage:Hide()
+local luaPage = CreateFrame("Frame")   -- left shown, like a page nobody has opened yet
 luaPage:SetScript("OnShow", function() LUA_SHOWN = (LUA_SHOWN or 0) + 1 end)
 do
     local bg = luaPage:CreateTexture()
@@ -116,6 +115,7 @@ Check(DBI:GetMinimapButton("DrangedAddons") ~= nil, "hub minimap button register
 SlashCmdList.DRANGEDHUB("")
 local hub = DrangedAddonsFrame
 Check(hub and hub:IsShown(), "/dranged opens the window")
+local function Drive(dt) hub:GetScript("OnUpdate")(hub, dt) end
 SlashCmdList.DRANGEDHUB("")
 Check(not hub:IsShown(), "/dranged again closes it")
 
@@ -149,8 +149,7 @@ mm.set(true)
 -- Options page
 SlashCmdList.DRANGEDHUB("tooltip")
 Check(ttePanel:IsVisible() and TTE_BUILT == 1, "TooltipExtras Options page shown in the hub and built")
-local upd = ttePanel:GetScript("OnUpdate")
-if upd then upd(ttePanel, 1) end
+Drive(1)
 Check(ttePanel:GetHeight() > 800, "Options page height follows its contents, got " .. ttePanel:GetHeight())
 Check(not crWin:IsShown(), "CraftRoute parked")
 
@@ -182,20 +181,28 @@ Check(hub:GetWidth() == normalW, "back to the normal width on another page")
 
 -- an addon described in Lua before the hub loaded
 LUA_SHOWN = 0
+HUB_HIDES = 0
+hub:HookScript("OnHide", function() HUB_HIDES = HUB_HIDES + 1 end)
+local hidesBefore = HUB_HIDES
 SlashCmdList.DRANGEDHUB("luaaddon")
 Check(luaPage:IsVisible() and luaPage:GetParent() ~= nil, "DrangedHubSpecs entry set before the hub loaded is hosted")
 Check(luaPage:GetHeight() == 1540, "page height from its contents, pinned buttons and background ignored, got " .. tostring(luaPage:GetHeight()))
-local tick = luaPage:GetScript("OnUpdate")
-for _ = 1, 12 do tick(luaPage, 1) end
-Check(luaPage:GetHeight() == 1540, "and it stays there, got " .. tostring(luaPage:GetHeight()))
+Check(luaPage:GetNumPoints() == 2, "a page is pinned to both corners of its holder, like in the game's Options window")
 local shownBefore = LUA_SHOWN
-FlushTimers()
-Check(LUA_SHOWN > shownBefore and luaPage:IsVisible() and hub:IsShown(), "first show is repeated a frame later (the half-drawn page fix)")
+Drive(0.1)
+Check(LUA_SHOWN == shownBefore + 1 and luaPage:IsVisible() and hub:IsShown(), "first show is repeated a moment later")
+for _ = 1, 12 do Drive(1) end
+Check(luaPage:GetHeight() == 1540, "and the height stays there, got " .. tostring(luaPage:GetHeight()))
+Check(LUA_SHOWN == shownBefore + 1, "a page that drew properly isn't shown again")
 local shownAfter = LUA_SHOWN
 SlashCmdList.DRANGEDHUB("overview")
 SlashCmdList.DRANGEDHUB("luaaddon")
-FlushTimers()
+for _ = 1, 4 do Drive(0.5) end
 Check(LUA_SHOWN == shownAfter + 1, "later shows aren't repeated")
+Check(HUB_HIDES == hidesBefore, "the hub never closed itself while putting a page in")
+local printedBefore = #PRINTED
+SlashCmdList.DRANGEDHUB("debug")
+Check(#PRINTED >= printedBefore + 6, "/dranged debug prints the page's state")
 
 -- an addon's own description beats the built-in one
 local builtinSpec = NS.Spec(NS.byName.CastCount)

@@ -425,6 +425,10 @@ SlashCmdList.DRANGEDHUB = function(msg)
         NS.Toggle()
         return
     end
+    if msg == "debug" then
+        NS.DebugDump()
+        return
+    end
     if msg == "overview" or TITLE:lower():sub(1, #msg) == msg or ADDON:lower():sub(1, #msg) == msg then
         NS.OpenTo(ADDON)
         return

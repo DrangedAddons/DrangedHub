@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+- **Fixed:** in 0.2.0 an Options page (EscortReady) came up empty and stayed empty. Pages are now held the way the game's own Options window holds them: pinned to both corners of a holder that the hub sizes, instead of being given a size and re-placed.
+- The hub no longer re-anchors or resizes a hosted window from inside a size or show handler. Those only flag that a layout is needed, and the layout runs from the hub's own update, at most once a frame.
+- The hub no longer changes fonts inside a hosted window. An addon's window keeps the fonts its own addon gave it; an Options page keeps the game's.
+- A page shown in the hub for the first time is shown once more a moment later, and again only if the game still hasn't placed something in it.
+- The hub can no longer close and reopen itself while it's putting a page in.
+- `/dranged debug` prints what the hub thinks is on show (sizes, anchors, how many things in the page have no place on screen), for when a page looks wrong.
+
 ## 0.2.0
 - **Fixed:** an addon's page could come up half drawn the first time it was clicked (EscortReady showed its title and one unlabelled tick box) and only filled in on the second click. The hub was changing the page's fonts after it had been laid out. Fonts now go on first, and the first show is repeated a frame later.
 - **Addons describe themselves.** An addon can say where its settings window is, how to build it and which buttons it wants, with `X-DrangedHub` lines in its `.toc` or a `DrangedHubSpecs` entry in its Lua. Either works whichever addon loads first. A new version of an addon, or a new addon, no longer needs a new version of the hub. The built-in list stays for addon versions that say nothing, and an addon's own description replaces its entry there. See the README.

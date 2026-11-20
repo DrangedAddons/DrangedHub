@@ -281,25 +281,25 @@ local function FitWidth(want)
     if math.abs(target - cur) > 0.5 then frame:SetWidth(target) end
 end
 
-local laying
+-- Sizes the pane to what the hosted window or page needs. Runs from the
+-- window's own OnUpdate (and right after a page is picked), never from inside
+-- a size or show handler: those only set `dirty`.
+local dirty       -- lay out again on the next update
+local sinceLook   -- seconds since the last look at the hosted contents
+local checks      -- { entry, t1, t2 ... }: times left at which to check the page drew
+
 local function LayoutHosted()
-    if laying then return end
     local rec = current and Host.Record(current)
     if not rec or not rec.holder then return end
-    laying = true
-    local f = rec.frame
-    local s = f:GetScale() or 1
-    -- a page is as wide as the pane unless its contents need more
-    FitWidth(rec.page and (rec.needW or 0) * s or (f:GetWidth() or 0) * s)
-    if rec.page then Host.Refit(current) end
-    local w = (f:GetWidth() or 0) * s
-    local h = ((f:GetHeight() or 0) - rec.crop) * s
-    parts.hostScroll:SetContentSize(math.max(50, w), math.max(50, h))
-    laying = false
+    Host.Replace(rec)   -- only if the addon moved it
+    local w, h, want = Host.Need(rec)
+    FitWidth(want)
+    w, h = Host.Need(rec)   -- the pane may be wider now
+    parts.hostScroll:SetContentSize(w, h)
 end
 
 NS.OnHostedResize = function(rec)
-    if frame and frame:IsShown() and current == rec.entry then LayoutHosted() end
+    if current == rec.entry then dirty = true end
 end
 
 -- The room a hosted page has: the pane's width and height.
@@ -307,15 +307,74 @@ NS.HostViewport = function()
     if parts.hostScroll then return parts.hostScroll:Viewport() end
 end
 
--- A window shown here for the first time can come up half drawn: a moment ago
--- it was laid out at another scale and font. Showing it again once the game
--- has drawn a frame puts it right (what clicking its row a second time did).
-local function Settle(entry)
-    local function Again()
-        if frame:IsShown() and current == entry then Select(entry) end
+-- Shows the hosted page again, the way clicking its row a second time does.
+local function Reshow(rec)
+    rec.reshown = (rec.reshown or 0) + 1
+    parts.hostPage:Hide()
+    parts.hostPage:Show()
+    Host.Replace(rec, true)
+    LayoutHosted()
+end
+
+-- The hub's heartbeat while it's open.
+local function OnUpdate(_, elapsed)
+    local rec = current and Host.Record(current)
+    if not rec or not rec.holder or not parts.hostPage:IsShown() then
+        dirty, checks = false, nil
+        return
     end
-    C_Timer.After(0, Again)
-    C_Timer.After(0.15, Again)
+    -- contents change without any size event (a section opens, a list fills)
+    sinceLook = (sinceLook or 0) + (elapsed or 0)
+    if sinceLook >= 0.4 then
+        sinceLook = 0
+        dirty = true
+    end
+    if dirty then
+        dirty = false
+        LayoutHosted()
+    end
+    -- A page shown here for the first time gets shown once more a frame
+    -- later, and again if the game still hasn't placed everything in it.
+    if checks and checks.entry == current then
+        checks.t = checks.t + (elapsed or 0)
+        local due = checks[1]
+        if due and checks.t >= due then
+            table.remove(checks, 1)
+            local lost = Host.Lost(rec)
+            -- once more regardless the first time; after that only while it helps
+            if checks.always or (lost > 0 and lost ~= checks.lost) then
+                checks.always, checks.lost = false, lost
+                Reshow(rec)
+            end
+            if #checks == 0 then checks = nil end
+        end
+    else
+        checks = nil
+    end
+end
+
+-- /dranged debug: what the hub thinks is on show, for when a page looks wrong.
+function NS.DebugDump()
+    local out = {}
+    out[#out + 1] = ("v%s, look %s, scale %s, open %s"):format(NS.VERSION, tostring(NS.ActiveTheme()),
+        tostring(NS.db.scale), tostring(frame ~= nil and frame:IsShown()))
+    if frame and current then
+        local rec = Host.Record(current)
+        out[#out + 1] = ("page %s, window %.0fx%.0f, pane %.0fx%.0f, scrolled %.0f / %.0f"):format(current.name,
+            frame:GetWidth() or 0, frame:GetHeight() or 0, parts.hostScroll:GetWidth() or 0, parts.hostScroll:GetHeight() or 0,
+            parts.hostScroll:GetVerticalScroll() or 0, parts.hostScroll:GetHorizontalScroll() or 0)
+        if rec and rec.holder and parts.hostPage:IsShown() then
+            local ok, lines = pcall(Host.Describe, rec)
+            if ok then
+                for _, line in ipairs(lines) do out[#out + 1] = line end
+            else
+                out[#out + 1] = "describe failed: " .. tostring(lines)
+            end
+        else
+            out[#out + 1] = "no hosted window on show for this page"
+        end
+    end
+    for _, line in ipairs(out) do NS.Print(line) end
 end
 
 local function InfoText(entry, hasSettings)
@@ -390,6 +449,9 @@ function Select(entry)
     else
         if entry.loaded and NS.db.host and Host.Has(entry) then
             parts.hostPage:Show()
+            -- a page takes its size from the pane's holder: give it the pane's size to start with
+            local vw, vh = parts.hostScroll:Viewport()
+            if vw > 0 and vh > 0 then parts.hostScroll:SetContentSize(vw, vh) end
             rec, first = Host.Attach(entry, parts.hostContent)
         end
         if rec then
@@ -419,7 +481,15 @@ function Select(entry)
     RefreshList()
     UI.RefreshAll()
     NS.NoteThemeFonts(frame)
-    if first then Settle(entry) end
+    dirty, sinceLook = rec ~= nil, 0
+    if first then
+        -- next frame: show it once more whatever it looks like; then twice more only if needed
+        checks = { entry = entry, t = 0, always = true, 0.05, 0.3, 1 }
+    elseif rec then
+        checks = { entry = entry, t = 0, always = false, 0.3, 1 }
+    else
+        checks = nil
+    end
 end
 
 -- An addon loaded after login (load on demand): its row moves to Addons.
@@ -525,10 +595,7 @@ local function Build()
     local stepper = UI.Stepper(side, 98, function() return NS.db.scale or 1 end, function(v)
         NS.db.scale = v
         frame:SetScale(v)
-        if current then
-            Host.Refit(current)
-            LayoutHosted()
-        end
+        dirty = true
     end, 0.7, 1.8, 0.1, function(v) return ("%d%%"):format(v * 100 + 0.5) end)
     stepper:SetPoint("BOTTOMRIGHT", -14, 48)
 
@@ -586,13 +653,16 @@ local function Build()
 
     parts.hostPage = CreateFrame("Frame", nil, body)
     parts.hostPage:SetAllPoints()
-    parts.hostScroll, parts.hostContent = UI.ScrollBox(parts.hostPage)
-    parts.hostScroll.onViewport = function()
-        if frame:IsShown() and current and not laying then
-            Host.Refit(current)
-            LayoutHosted()
-        end
-    end
+    -- Two plain frames between the page and its scroll box. The kit's font
+    -- pass walks this window eight frames deep, and these put a hosted
+    -- addon's window past that: its fonts are its own business, and changing
+    -- them under a page that's already laid out left parts of it undrawn.
+    local wrap = CreateFrame("Frame", nil, parts.hostPage)
+    wrap:SetAllPoints()
+    local wrap2 = CreateFrame("Frame", nil, wrap)
+    wrap2:SetAllPoints()
+    parts.hostScroll, parts.hostContent = UI.ScrollBox(wrap2)
+    parts.hostScroll.onViewport = function() dirty = true end
 
     parts.infoPage = CreateFrame("Frame", nil, body)
     parts.infoPage:SetAllPoints()
@@ -618,6 +688,7 @@ local function Build()
         if current then Host.Park(current) end
         UI.CloseMenu()
     end)
+    frame:SetScript("OnUpdate", OnUpdate)
     NS.ThemeRegisterWindow(frame)
 end
 
