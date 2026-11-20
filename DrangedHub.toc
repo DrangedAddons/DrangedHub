@@ -1,0 +1,24 @@
+## Interface: 16001
+## Title: DrangedAddons
+## Notes: One window for every Dranged addon's settings.
+## Author: Dranged
+## Version: 0.1.0
+## X-DrangedAddons-Games: _forever_
+## IconTexture: Interface\AddOns\DrangedHub\icon
+## AddonCompartmentFunc: DrangedAddons_OnCompartmentClick
+## SavedVariables: DrangedAddonsDB
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+Theme.lua
+Widgets.lua
+Window.lua
+
+Core.lua
+Controls.lua
+Host.lua
+Adapters.lua
+Hub.lua
