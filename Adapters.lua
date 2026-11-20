@@ -2,10 +2,12 @@
 --  DrangedAddons - Adapters
 --  Author: Dranged
 ---------------------------------------------------------
--- What the hub knows about the addons that don't register themselves yet:
+-- What the hub knows about addon versions that don't describe themselves:
 -- where each one's settings window is, how to get it built, how much of its
 -- title bar to cut off, and which windows get a button in the footer.
--- An addon that calls DrangedAddons.Register itself replaces its entry here.
+-- An addon with X-DrangedHub lines in its .toc, or its own DrangedHubSpecs
+-- entry, replaces its entry here (see Core.lua), so this list only ever has
+-- to cover the versions that were out before the addon said it itself.
 
 local ADDON, NS = ...
 
@@ -24,23 +26,23 @@ local function Slash(key, msg)
     end
 end
 
-NS.Register({
+NS.Builtin({
     name = "AuctionatorSync",
     settings = { frame = "AuctionatorSyncFrame", open = Compartment("AuctionatorSync_OnCompartmentClick"), crop = 34 },
     actions = { { "Price list", Compartment("AuctionatorSync_OnCompartmentClick", "RightButton") } },
 })
 
-NS.Register({
+NS.Builtin({
     name = "CastCount",
     settings = { frame = "CastCountConfig", open = Compartment("CastCount_OnCompartmentClick"), crop = 34 },
 })
 
-NS.Register({
+NS.Builtin({
     name = "ConfuciusSay",
     settings = { frame = "ConfuciusSayConfig", open = Compartment("ConfuciusSay_OnCompartmentClick"), crop = 34 },
 })
 
-NS.Register({
+NS.Builtin({
     name = "CraftRoute",
     settings = { frame = "CraftRouteSettings", crop = 60 },
     -- its own minimap button, not LibDBIcon's
@@ -59,7 +61,7 @@ NS.Register({
     },
 })
 
-NS.Register({
+NS.Builtin({
     name = "CrateCost",
     settings = { frame = "CrateCostConfig", open = Slash("CRATECOST", "config"), crop = 42 },
     actions = {
@@ -71,7 +73,7 @@ NS.Register({
     },
 })
 
-NS.Register({
+NS.Builtin({
     name = "EscortReady",
     settings = {
         canvas = "EscortReady",
@@ -79,24 +81,24 @@ NS.Register({
     },
 })
 
-NS.Register({
+NS.Builtin({
     name = "GroupHost",
     settings = { frame = "GroupHostFrame", open = Compartment("GroupHost_OnCompartmentClick"), crop = 40 },
 })
 
-NS.Register({
+NS.Builtin({
     name = "HoTForecast",
     settings = { frame = "HoTForecastConfig", open = Compartment("HoTForecast_OnCompartmentClick"), crop = 42 },
 })
 
-NS.Register({
+NS.Builtin({
     name = "ShoppingDock",
     settings = { frame = "ShoppingDockSettings", open = Compartment("ShoppingDock_OnCompartmentClick", "RightButton"), crop = 40 },
     actions = { { "Shopping list", Slash("SHOPPINGDOCK", "") } },
 })
 
 -- Its settings are a panel beside its main window, so they stay there.
-NS.Register({
+NS.Builtin({
     name = "SpawnCamp",
     actions = {
         { "SpawnCamp window", Slash("SPAWNCAMP", "") },
@@ -104,12 +106,12 @@ NS.Register({
     },
 })
 
-NS.Register({
+NS.Builtin({
     name = "TooltipExtras",
     settings = { canvas = "TooltipExtras", open = Slash("TOOLTIPEXTRAS", "") },
 })
 
-NS.Register({
+NS.Builtin({
     name = "VendorPoint",
     actions = {
         { "Nearest vendor", Slash("VENDORPOINT", "vendor"), keep = true },
@@ -119,12 +121,12 @@ NS.Register({
 })
 
 -- Webby's own settings window (820 wide, with its own side list) stays its own.
-NS.Register({
+NS.Builtin({
     name = "WebbyFrames",
     actions = { { "Settings", Compartment("WebbyFrames_OnCompartmentClick") } },
 })
 
-NS.Register({
+NS.Builtin({
     name = "ZoneStyle",
     settings = { frame = "ZoneStyleConfig", open = Compartment("ZoneStyle_OnCompartmentClick"), crop = 42 },
     actions = { { "Preview", Slash("ZONESTYLE", "preview"), keep = true } },

@@ -2,7 +2,7 @@
 ## Title: DrangedAddons
 ## Notes: One window for every Dranged addon's settings.
 ## Author: Dranged
-## Version: 0.1.0
+## Version: 0.2.0
 ## X-DrangedAddons-Games: _forever_
 ## IconTexture: Interface\AddOns\DrangedHub\icon
 ## AddonCompartmentFunc: DrangedAddons_OnCompartmentClick

@@ -37,6 +37,55 @@ function CastCount_OnCompartmentClick()
 end
 SLASH_CASTCOUNT1 = "/cc"
 
+-- TocAddon: described by X-DrangedHub lines in its .toc. Its window is built by its slash command.
+local tocWin
+SLASH_TOCADDON1 = "/tocaddon"
+SlashCmdList.TOCADDON = function(msg)
+    TOC_SLASH = msg
+    if msg == "config" and not tocWin then
+        tocWin = CreateFrame("Frame", "TocAddonWin", UIParent, "BackdropTemplate")
+        tocWin:SetSize(1400, 500)   -- wider than the hub's pane
+        tocWin:SetPoint("CENTER")
+        tocWin.nsTitle = tocWin:CreateFontString()
+        tocWin.nsTitle:SetPoint("TOP", 0, -10)
+        tocWin.nsTitle:SetText("TocAddon")
+        local body = CreateFrame("Frame", nil, tocWin)
+        body:SetSize(600, 300)
+        body:SetPoint("TOPLEFT", 16, -46)
+        tocWin:Hide()
+    end
+    if tocWin and msg == "config" then tocWin:Show() end
+end
+
+-- LuaAddon: loads before the hub and describes itself with a table. Its page has a
+-- background that fills it and two buttons pinned to its bottom edge.
+local luaPage = CreateFrame("Frame")
+luaPage:Hide()
+luaPage:SetScript("OnShow", function() LUA_SHOWN = (LUA_SHOWN or 0) + 1 end)
+do
+    local bg = luaPage:CreateTexture()
+    bg:SetAllPoints()
+    local block = CreateFrame("Frame", nil, luaPage)
+    block:SetSize(400, 1500)
+    block:SetPoint("TOPLEFT", 16, -16)
+    local ok = CreateFrame("Button", nil, luaPage)
+    ok:SetSize(100, 22)
+    ok:SetPoint("BOTTOMLEFT", 16, 16)
+    local cancel = CreateFrame("Button", nil, luaPage)
+    cancel:SetSize(100, 22)
+    cancel:SetPoint("LEFT", ok, "RIGHT", 8, 0)
+end
+DrangedHubSpecs = DrangedHubSpecs or {}
+DrangedHubSpecs.LuaAddon = {
+    settings = { frame = function() return luaPage end, page = true },
+    actions = { { "Lua action", function() LUA_ACTION = true end, keep = true } },
+}
+
+-- GuessAddon: says nothing, has a window under a usual name.
+local guessWin = CreateFrame("Frame", "GuessAddonConfig", UIParent)
+guessWin:SetSize(500, 400)
+guessWin:Hide()
+
 local NS = LoadAddon(ADDON_DIR, "DrangedHub",
     { "Theme.lua", "Widgets.lua", "Window.lua", "Core.lua", "Controls.lua", "Host.lua", "Adapters.lua", "Hub.lua" })
 FireEvent("ADDON_LOADED", "DrangedHub")
@@ -48,6 +97,7 @@ ttePanel:SetScript("OnShow", function(self)
     if not self.child then
         self.child = CreateFrame("Frame", nil, self)
         self.child:SetSize(300, 820)
+        self.child:SetPoint("TOPLEFT", 16, -16)
     end
 end)
 Settings.RegisterCanvasLayoutCategory(ttePanel, "TooltipExtras")
@@ -58,7 +108,7 @@ DBI:Register("VendorPoint", {}, {})
 FireEvent("PLAYER_LOGIN")
 
 Say("look = " .. LOOK)
-Check(NS.addons and #NS.addons == 8, "found 8 Dranged addons, got " .. tostring(NS.addons and #NS.addons))
+Check(NS.addons and #NS.addons == 11, "found 11 Dranged addons, got " .. tostring(NS.addons and #NS.addons))
 Check(NS.byName.TooltipExtras.title == "TooltipExtras", "colour codes stripped from titles")
 Check(NS.byName.Questie == nil, "other authors' addons are left out")
 Check(DBI:GetMinimapButton("DrangedAddons") ~= nil, "hub minimap button registered")
@@ -112,6 +162,51 @@ SlashCmdList.DRANGEDHUB("vendor")
 SlashCmdList.DRANGEDHUB("zonestyle")
 SlashCmdList.DRANGEDHUB("hotprobe")
 Check(hub:IsShown(), "info pages for the rest")
+
+-- an addon described by its .toc: window built by its command, title bar measured, wide window
+SlashCmdList.DRANGEDHUB("overview")
+local normalW = hub:GetWidth()
+Check(NS.byName.TocAddon.tool == true, "X-DrangedHub-Tool lists the addon under Tools")
+SlashCmdList.DRANGEDHUB("tocaddon")
+Check(TOC_SLASH == "config" and tocWin and tocWin:IsVisible(), ".toc Frame + Open: the command builds the window and it shows in the hub")
+Check(tocWin:GetParent() ~= UIParent and not tocWin.nsTitle:IsShown(), "its title is off")
+local _, _, _, _, cropY = tocWin:GetPoint(1)
+Check(cropY == 40, "title bar measured without a Crop line, got " .. tostring(cropY))
+Check(hub:GetWidth() > normalW, "the hub widens for a 1400 px window, got " .. tostring(hub:GetWidth()))
+local spec = NS.Spec(NS.byName.TocAddon)
+Check(#spec.actions == 2 and spec.actions[1][1] == "Main window" and spec.actions[2].keep == true, ".toc Actions parsed, [keep] read")
+spec.actions[2][2]()
+Check(TOC_SLASH == "preview", "a .toc action runs its slash command")
+SlashCmdList.DRANGEDHUB("overview")
+Check(hub:GetWidth() == normalW, "back to the normal width on another page")
+
+-- an addon described in Lua before the hub loaded
+LUA_SHOWN = 0
+SlashCmdList.DRANGEDHUB("luaaddon")
+Check(luaPage:IsVisible() and luaPage:GetParent() ~= nil, "DrangedHubSpecs entry set before the hub loaded is hosted")
+Check(luaPage:GetHeight() == 1540, "page height from its contents, pinned buttons and background ignored, got " .. tostring(luaPage:GetHeight()))
+local tick = luaPage:GetScript("OnUpdate")
+for _ = 1, 12 do tick(luaPage, 1) end
+Check(luaPage:GetHeight() == 1540, "and it stays there, got " .. tostring(luaPage:GetHeight()))
+local shownBefore = LUA_SHOWN
+FlushTimers()
+Check(LUA_SHOWN > shownBefore and luaPage:IsVisible() and hub:IsShown(), "first show is repeated a frame later (the half-drawn page fix)")
+local shownAfter = LUA_SHOWN
+SlashCmdList.DRANGEDHUB("overview")
+SlashCmdList.DRANGEDHUB("luaaddon")
+FlushTimers()
+Check(LUA_SHOWN == shownAfter + 1, "later shows aren't repeated")
+
+-- an addon's own description beats the built-in one
+local builtinSpec = NS.Spec(NS.byName.CastCount)
+DrangedHubSpecs.CastCount = { settings = { frame = "CastCountConfig", crop = 10 } }
+Check(NS.Spec(NS.byName.CastCount) ~= builtinSpec and NS.Spec(NS.byName.CastCount).settings.crop == 10, "an addon's own entry replaces the built-in one")
+DrangedHubSpecs.CastCount = nil
+Check(NS.Spec(NS.byName.CastCount) == builtinSpec, "and the built-in one is back without it")
+
+-- an addon that says nothing
+SlashCmdList.DRANGEDHUB("guessaddon")
+Check(guessWin:IsVisible() and guessWin:GetParent() ~= UIParent, "a window named <Addon>Config is found without being told")
 
 -- overview
 SlashCmdList.DRANGEDHUB("drangedaddons")

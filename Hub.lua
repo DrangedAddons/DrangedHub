@@ -268,19 +268,54 @@ end
 ---------------------------------------------------------
 --  SECTION: Addon page (right)
 ---------------------------------------------------------
+-- Widens the window when what it hosts is wider than the pane, as far as the
+-- screen allows. Past that the pane scrolls sideways.
+local function FitWidth(want)
+    local vw = parts.hostScroll:GetWidth() or 0
+    if vw <= 0 then return end
+    local cur = frame:GetWidth() or W
+    local base = vw - (cur - W)   -- the pane's width at the normal window width
+    local target = W + math.max(0, math.ceil((want or 0) - base))
+    local screen = (UIParent:GetWidth() or 0) / (frame:GetScale() or 1) - 40
+    if screen > W then target = math.min(target, screen) end
+    if math.abs(target - cur) > 0.5 then frame:SetWidth(target) end
+end
+
+local laying
 local function LayoutHosted()
+    if laying then return end
     local rec = current and Host.Record(current)
     if not rec or not rec.holder then return end
+    laying = true
     local f = rec.frame
     local s = f:GetScale() or 1
+    -- a page is as wide as the pane unless its contents need more
+    FitWidth(rec.page and (rec.needW or 0) * s or (f:GetWidth() or 0) * s)
+    if rec.page then Host.Refit(current) end
     local w = (f:GetWidth() or 0) * s
     local h = ((f:GetHeight() or 0) - rec.crop) * s
-    parts.hostContent:SetWidth(math.max(50, w))
-    parts.hostScroll:SetContentHeight(math.max(50, h))
+    parts.hostScroll:SetContentSize(math.max(50, w), math.max(50, h))
+    laying = false
 end
 
 NS.OnHostedResize = function(rec)
     if frame and frame:IsShown() and current == rec.entry then LayoutHosted() end
+end
+
+-- The room a hosted page has: the pane's width and height.
+NS.HostViewport = function()
+    if parts.hostScroll then return parts.hostScroll:Viewport() end
+end
+
+-- A window shown here for the first time can come up half drawn: a moment ago
+-- it was laid out at another scale and font. Showing it again once the game
+-- has drawn a frame puts it right (what clicking its row a second time did).
+local function Settle(entry)
+    local function Again()
+        if frame:IsShown() and current == entry then Select(entry) end
+    end
+    C_Timer.After(0, Again)
+    C_Timer.After(0.15, Again)
 end
 
 local function InfoText(entry, hasSettings)
@@ -347,19 +382,20 @@ function Select(entry)
     parts.infoPage:Hide()
     parts.hostPage:Hide()
     local actions = {}
-    local spec = entry.spec
+    local spec = NS.Spec(entry)
+    local rec, first
     if entry.isHub then
         BuildHome()
         parts.homePage:Show()
     else
-        local rec
         if entry.loaded and NS.db.host and Host.Has(entry) then
             parts.hostPage:Show()
-            rec = Host.Attach(entry, parts.hostContent)
+            rec, first = Host.Attach(entry, parts.hostContent)
         end
         if rec then
             LayoutHosted()
             parts.hostScroll:ScrollTo(0)
+            parts.hostScroll:ScrollToX(0)
         else
             parts.hostPage:Hide()
             local opener = entry.loaded and spec and spec.settings and spec.settings.open
@@ -377,9 +413,18 @@ function Select(entry)
     local cmds = entry.loaded and NS.Commands(entry) or {}
     parts.cmds:SetText(table.concat(cmds, "   "))
 
+    -- back to the normal width
+    if not rec and math.abs((frame:GetWidth() or W) - W) > 0.5 then frame:SetWidth(W) end
+
     RefreshList()
     UI.RefreshAll()
     NS.NoteThemeFonts(frame)
+    if first then Settle(entry) end
+end
+
+-- An addon loaded after login (load on demand): its row moves to Addons.
+function NS.RefreshWindow()
+    if frame and frame:IsShown() then RefreshList() end
 end
 
 ---------------------------------------------------------
@@ -480,6 +525,10 @@ local function Build()
     local stepper = UI.Stepper(side, 98, function() return NS.db.scale or 1 end, function(v)
         NS.db.scale = v
         frame:SetScale(v)
+        if current then
+            Host.Refit(current)
+            LayoutHosted()
+        end
     end, 0.7, 1.8, 0.1, function(v) return ("%d%%"):format(v * 100 + 0.5) end)
     stepper:SetPoint("BOTTOMRIGHT", -14, 48)
 
@@ -537,7 +586,13 @@ local function Build()
 
     parts.hostPage = CreateFrame("Frame", nil, body)
     parts.hostPage:SetAllPoints()
-    parts.hostScroll, parts.hostContent = UI.ScrollArea(parts.hostPage, NS.HOST_W)
+    parts.hostScroll, parts.hostContent = UI.ScrollBox(parts.hostPage)
+    parts.hostScroll.onViewport = function()
+        if frame:IsShown() and current and not laying then
+            Host.Refit(current)
+            LayoutHosted()
+        end
+    end
 
     parts.infoPage = CreateFrame("Frame", nil, body)
     parts.infoPage:SetAllPoints()

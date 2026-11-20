@@ -84,19 +84,80 @@ end
 function M.SetSize(o, w, h) Sized(o, w, h) end
 function M.SetWidth(o, w) Sized(o, w, o._h) end
 function M.SetHeight(o, h) Sized(o, o._w, h) end
-function M.GetWidth(o) return o._w end
-function M.GetHeight(o) return o._h end
-function M.GetSize(o) return o._w, o._h end
+-- Anchors are resolved for real (no scale): left, top, right, bottom, or nil
+-- when the object isn't anchored to anything.
+local function Rect(o, depth)
+    depth = depth or 0
+    if depth > 30 then return nil end
+    if o == UIParent then return 0, 1200, 4266, 0 end
+    local w, h = o._w, o._h
+    if o._type == "FontString" then
+        if w == 0 then w = #(tostring(o._text or "")) * 7 end
+        if h == 0 then h = 12 end
+    end
+    if o._scrollOf then   -- a scroll frame's content sits at its top left
+        local l, t = Rect(o._scrollOf, depth + 1)
+        if not l then return nil end
+        return l, t, l + w, t - h
+    end
+    local L, T, R, B, CX, CY
+    for _, p in ipairs(o._points) do
+        local rl, rt, rr, rb = Rect(p[2] or o._parent or UIParent, depth + 1)
+        if rl then
+            local rp = p[3]
+            local x = rp:find("LEFT") and rl or rp:find("RIGHT") and rr or (rl + rr) / 2
+            local y = rp:find("TOP") and rt or rp:find("BOTTOM") and rb or (rt + rb) / 2
+            x, y = x + p[4], y + p[5]
+            if p[1]:find("LEFT") then L = x elseif p[1]:find("RIGHT") then R = x else CX = x end
+            if p[1]:find("TOP") then T = y elseif p[1]:find("BOTTOM") then B = y else CY = y end
+        end
+    end
+    if not (L and R) then
+        if L then R = L + w elseif R then L = R - w elseif CX then L, R = CX - w / 2, CX + w / 2 else return nil end
+    end
+    if not (T and B) then
+        if T then B = T - h elseif B then T = B + h elseif CY then T, B = CY + h / 2, CY - h / 2 else return nil end
+    end
+    return L, T, R, B
+end
+function M.GetWidth(o)
+    if o._w == 0 then
+        local l, _, r = Rect(o)
+        if l then return r - l end
+    end
+    return o._w
+end
+function M.GetHeight(o)
+    if o._h == 0 then
+        local l, t, _, b = Rect(o)
+        if l then return t - b end
+    end
+    return o._h
+end
+function M.GetSize(o) return o:GetWidth(), o:GetHeight() end
 function M.SetPoint(o, point, a, b, c, d)
     assert(type(point) == "string", "SetPoint: point must be a string")
-    local rel = type(a) == "table" and a or nil
-    o._points[#o._points + 1] = { point, rel }
+    local rel, relPoint, x, y
+    if type(a) == "number" then
+        x, y = a, b
+    elseif type(a) == "table" then
+        rel = a
+        if type(b) == "string" then relPoint, x, y = b, c, d else x, y = b, c end
+    end
+    local p = { point, rel, relPoint or point, x or 0, y or 0 }
+    for i, old in ipairs(o._points) do
+        if old[1] == point then o._points[i] = p return end
+    end
+    o._points[#o._points + 1] = p
 end
-function M.SetAllPoints(o) o._points = { { "TOPLEFT" }, { "BOTTOMRIGHT" } } end
+function M.SetAllPoints(o, rel)
+    o._points = { { "TOPLEFT", rel, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", rel, "BOTTOMRIGHT", 0, 0 } }
+end
 function M.ClearAllPoints(o) o._points = {} end
+function M.GetNumPoints(o) return #o._points end
 function M.GetPoint(o, i)
     local p = o._points[i or 1]
-    if p then return p[1], p[2] or o._parent, p[1], 0, 0 end
+    if p then return p[1], p[2] or o._parent, p[3], p[4], p[5] end
 end
 function M.GetChildren(o) return unpack(o._children) end
 function M.GetRegions(o) return unpack(o._regions) end
@@ -114,10 +175,10 @@ function M.SetFrameLevel(o, l) assert(type(l) == "number", "bad level"); o._leve
 function M.GetFrameLevel(o) return o._level end
 function M.GetFrameStrata() return "DIALOG" end
 function M.SetFrameStrata(o, s) assert(type(s) == "string", "bad strata") end
-function M.GetTop() return 1000 end
-function M.GetBottom(o) return 1000 - o._h end
-function M.GetLeft() return 0 end
-function M.GetRight(o) return o._w end
+function M.GetTop(o) local _, t = Rect(o); return t end
+function M.GetBottom(o) local _, _, _, b = Rect(o); return b end
+function M.GetLeft(o) local l = Rect(o); return l end
+function M.GetRight(o) local _, _, r = Rect(o); return r end
 function M.GetFont() return "Fonts\\FRIZQT__.TTF", 12, "" end
 function M.SetFont() return true end
 function M.GetHighlightTexture(o) o._hl = o._hl or NewObj("Texture", nil, o, true); return o._hl end
@@ -132,7 +193,9 @@ function M.CreateLine(o) return NewObj("Line", nil, o, true) end
 function M.RegisterEvent(o, e) o._events[e] = true end
 function M.GetVerticalScroll(o) return o._scroll or 0 end
 function M.SetVerticalScroll(o, v) assert(type(v) == "number"); o._scroll = v end
-function M.SetScrollChild(o, c) o._scrollChild = c end
+function M.GetHorizontalScroll(o) return o._hscroll or 0 end
+function M.SetHorizontalScroll(o, v) assert(type(v) == "number"); o._hscroll = v end
+function M.SetScrollChild(o, c) o._scrollChild = c; c._scrollOf = o end
 function M.GetValue(o) return o._value or 0 end
 function M.SetValue(o, v) o._value = v; Fire(o, "OnValueChanged", v) end
 function M.GetChecked(o) return o._checked end
@@ -232,8 +295,14 @@ ADDONS = {
     { "DrangedHub", "DrangedAddons", "Hub", { Author = "Dranged", Version = "0.1.0" }, true },
     { "EscortReady", "EscortReady", "Escort", { Author = "Dranged", Version = "0.13.0" }, true },
     { "FishIO", "FishIO", "Fishing", { Author = "Dranged", Version = "0.1.0" }, true },
+    { "GuessAddon", "GuessAddon", "Says nothing about itself", { Author = "Dranged", Version = "1.0.0" }, true },
     { "HoTProbe", "HoTProbe", "Probe", { Author = "Dranged", Version = "0.2.0" }, true },
     { "Questie", "Questie", "Quests", { Author = "Someone" }, true },
+    { "LuaAddon", "LuaAddon", "Describes itself in Lua", { Author = "Dranged", Version = "1.0.0" }, true },
+    { "TocAddon", "TocAddon", "Describes itself in its .toc", { Author = "Dranged", Version = "2.0.0",
+        ["X-DrangedHub-Frame"] = "TocAddonWin", ["X-DrangedHub-Open"] = "/tocaddon config",
+        ["X-DrangedHub-Actions"] = "Main window=/tocaddon; Preview = /tocaddon preview [keep]",
+        ["X-DrangedHub-Tool"] = "1" }, true },
     { "TooltipExtras", "|cff33ff99TooltipExtras|r", "Tooltips", { Author = "Dranged", Version = "0.31.0" }, true },
     { "VendorPoint", "VendorPoint", "Vendors", { Author = "Dranged", Version = "1.2.0" }, true },
     { "ZoneStyle", "ZoneStyle", "Zone text", { Author = "Dranged", Version = "1.0.0" }, false },

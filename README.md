@@ -28,24 +28,61 @@ Settings are account-wide: they are the window's size and look, and whether its 
 
 No other addon's files are changed. Turn off **Show addon settings inside this window** on the Overview page and reload to give every window back.
 
-## For addon authors
-`Adapters.lua` describes the addons above. An addon can describe itself instead:
+## How an addon tells the hub about itself
+Each addon says where its settings are, so a new version of an addon, or a whole new addon, needs no new version of the hub. The hub never looks inside a settings window: whatever the addon draws there is what shows, measured and scrolled as it is.
+
+The hub takes the first of these it finds:
+
+1. the addon's `DrangedHubSpecs` entry (Lua)
+2. the addon's `X-DrangedHub` lines (`.toc`)
+3. the hub's built-in list in `Adapters.lua`, for addon versions from before they said it themselves
+4. a window named `<Addon>Config`, `<Addon>Settings` or `<Addon>Options`
+
+Neither of the first two depends on which addon loads first.
+
+### In the .toc
+No code. Leave out what doesn't apply.
+
+```
+## X-DrangedHub-Frame: MyAddonConfig
+## X-DrangedHub-Open: /myaddon config
+## X-DrangedHub-Actions: Main window=/myaddon; Preview=/myaddon preview [keep]
+```
+
+| Line | Meaning |
+|---|---|
+| `X-DrangedHub-Frame` | global name of the settings window |
+| `X-DrangedHub-Page` | or: the name of its Options > AddOns page (the hub must load before the addon for this one; otherwise use the Lua form with `frame` and `page = true`) |
+| `X-DrangedHub-Open` | slash command that builds the window when it doesn't exist yet |
+| `X-DrangedHub-Crop` | px of the window's own title bar to cut off. Left out, the hub measures it |
+| `X-DrangedHub-Actions` | footer buttons, `Label=/command` separated by `;`. `[keep]` after a command leaves the hub open |
+| `X-DrangedHub-Minimap` | its LibDBIcon name, when that isn't the folder name |
+| `X-DrangedHub-Tool` | `1` lists it under Tools |
+
+### In Lua
+For anything that needs a function. Works whether the addon loads before or after the hub.
 
 ```lua
-if DrangedAddons then
-    DrangedAddons.Register({
-        name = "MyAddon",                          -- the addon's folder name
-        settings = {
-            frame = "MyAddonConfig",               -- global name of the settings window, or a function returning it
-            open = function() MyAddon.OpenConfig() end,   -- builds it when it doesn't exist yet
-            crop = 34,                             -- px of the window's own title bar to cut off
-        },
-        actions = { { "Open window", function() MyAddon.Toggle() end } },
-    })
-end
+DrangedHubSpecs = DrangedHubSpecs or {}
+DrangedHubSpecs.MyAddon = {
+    settings = {
+        frame = "MyAddonConfig",        -- a global name, the frame itself, or a function returning it
+        page = true,                    -- the frame is a sizeless page: the hub sizes and scrolls it
+        open = function() MyAddon.OpenConfig() end,   -- builds it when it doesn't exist yet
+        crop = 34,                      -- left out: measured
+    },
+    minimap = { get = function() end, set = function(on) end },   -- only for a button that isn't LibDBIcon's
+    actions = { { "Open window", function() MyAddon.Toggle() end, keep = true } },
+}
 ```
 
 `DrangedAddons.Open("MyAddon")` opens the hub on an addon's page.
+
+### What a hosted window can rely on
+- **Any size.** Taller than the pane: it scrolls. Wider: the hub window widens as far as the screen allows, then scrolls sideways (Shift+wheel, or drag the bar).
+- **Changing size while open.** A window that resizes, or a page whose sections open and close, is followed.
+- **Its own scroll lists, dropdowns, sliders and edit boxes** work as they do in its own window. The wheel scrolls the list under the cursor, and the pane everywhere else.
+- **A page should be anchored from its top left.** Things pinned to a page's bottom or right edge follow the pane's size and aren't counted as contents.
 
 ## Development
 - `tools/make_icon.py` builds `logo.tga`, `icon.tga` and `icon.ico` from `tools/penrose.png`.

@@ -5,21 +5,37 @@
 -- Finds the installed Dranged addons, keeps what the hub knows about each one,
 -- and owns the saved settings, the slash command and the minimap button.
 --
--- An addon can describe itself to the hub (Adapters.lua does this for the
--- addons that don't yet):
+-- Each addon says for itself where its settings are, so a new version of an
+-- addon (or a new addon) needs no new version of the hub. Two ways, and
+-- neither depends on which addon loads first:
 --
---   DrangedAddons.Register({
---     name = "MyAddon",                       -- the addon's folder name
+-- 1. Lines in the addon's .toc (no code):
+--
+--   ## X-DrangedHub-Frame: MyAddonConfig        its settings window (a global frame name)
+--   ## X-DrangedHub-Page: MyAddon               or: the name of its Options > AddOns page
+--   ## X-DrangedHub-Open: /myaddon config       builds the window when it doesn't exist yet
+--   ## X-DrangedHub-Crop: 40                    px of the window's title bar to cut off (left out: measured)
+--   ## X-DrangedHub-Actions: Main window=/myaddon; Preview=/myaddon preview [keep]
+--   ## X-DrangedHub-Minimap: MyAddonLDB         its LibDBIcon name when that isn't the folder name
+--   ## X-DrangedHub-Tool: 1                     list it under Tools
+--
+-- 2. A table in the addon's Lua, for anything that needs a function:
+--
+--   DrangedHubSpecs = DrangedHubSpecs or {}
+--   DrangedHubSpecs.MyAddon = {
 --     settings = {
---       frame = "MyAddonConfig",              -- its settings window: a global name or a function returning the frame
+--       frame = "MyAddonConfig",              -- a global name, the frame itself, or a function returning it
 --       canvas = "MyAddon",                   -- or: the name of its Options > AddOns page
+--       page = true,                          -- frame is a sizeless page: the hub sizes and scrolls it
 --       open = function() ... end,            -- builds/opens the settings when the frame doesn't exist yet
---       crop = 34,                            -- px of the window's own title bar to cut off
+--       crop = 34,                            -- px of title bar to cut off (left out: measured)
 --     },
 --     minimap = { get = function() end, set = function(on) end },   -- only for a button that isn't LibDBIcon's
 --     ldb = "MyAddon",                        -- its LibDBIcon name when that isn't the folder name
 --     actions = { { "Open window", function() end, keep = true } }, -- footer buttons; keep = leave the hub open
---   })
+--   }
+--
+-- Adapters.lua holds the same thing for addon versions that say nothing.
 
 local ADDON, NS = ...
 
@@ -59,20 +75,106 @@ if Settings and Settings.RegisterCanvasLayoutCategory then
 end
 
 ---------------------------------------------------------
---  SECTION: Registry
+--  SECTION: What the hub knows about each addon
 ---------------------------------------------------------
-local specs = {}
+-- First one found wins: the addon's own Lua table, the addon's own .toc
+-- lines, the hub's built-in list (Adapters.lua), a guess from the usual
+-- frame names.
+DrangedHubSpecs = DrangedHubSpecs or {}
+local builtin = {}
 
+-- Same as setting DrangedHubSpecs[spec.name], for addons that load after the hub.
 function Hub.Register(spec)
     if type(spec) ~= "table" or type(spec.name) ~= "string" then return end
-    specs[spec.name] = spec
+    DrangedHubSpecs[spec.name] = spec
     local entry = NS.byName and NS.byName[spec.name]
-    if entry then
-        entry.spec = spec
-        entry.mm = nil
-    end
+    if entry then entry.mm = nil end
 end
-NS.Register = Hub.Register
+
+function NS.Builtin(spec)
+    builtin[spec.name] = spec
+end
+
+local function Meta(name, field)
+    local v = GetMeta(name, "X-DrangedHub-" .. field)
+    if type(v) ~= "string" then return nil end
+    v = strtrim(v)
+    if v == "" then return nil end
+    return v
+end
+
+-- Runs a slash command given as text ("/myaddon config"), as if typed.
+function NS.RunSlash(text)
+    local cmd, rest = tostring(text):match("^%s*(/%S+)%s*(.-)%s*$")
+    if not cmd then return false end
+    cmd = cmd:lower()
+    for key, fn in pairs(SlashCmdList) do
+        local i = 1
+        while true do
+            local slash = _G["SLASH_" .. key .. i]
+            if type(slash) ~= "string" then break end
+            if slash:lower() == cmd then
+                fn(rest)
+                return true
+            end
+            i = i + 1
+        end
+    end
+    NS.Print("no command " .. cmd .. " (is the addon loaded?)")
+    return false
+end
+
+-- The addon's X-DrangedHub lines as a spec, or nil when it has none.
+local function TocSpec(name)
+    local frame, page = Meta(name, "Frame"), Meta(name, "Page")
+    local open, actions, ldb = Meta(name, "Open"), Meta(name, "Actions"), Meta(name, "Minimap")
+    if not (frame or page or open or actions or ldb) then return nil end
+    local spec = { name = name, ldb = ldb }
+    local opener = open and function() NS.RunSlash(open) end or nil
+    if frame or page then
+        spec.settings = { frame = frame, canvas = page, open = opener, crop = tonumber(Meta(name, "Crop") or "") }
+    elseif opener then
+        spec.settings = { open = opener }
+    end
+    if actions then
+        spec.actions = {}
+        for part in actions:gmatch("[^;]+") do
+            local label, cmd = part:match("^%s*(.-)%s*=%s*(.-)%s*$")
+            if label and label ~= "" and cmd and cmd ~= "" then
+                local keep = false
+                local bare = cmd:match("^(.-)%s*%[keep%]$")
+                if bare then keep, cmd = true, bare end
+                spec.actions[#spec.actions + 1] = { label, function() NS.RunSlash(cmd) end, keep = keep }
+            end
+        end
+    end
+    return spec
+end
+
+-- An addon that says nothing and isn't in the built-in list: look for a
+-- settings window under the names the Dranged addons use.
+local GUESS = { "Config", "Settings", "Options", "ConfigFrame", "SettingsFrame", "OptionsFrame" }
+
+local function Guess(entry)
+    if entry.guess then return entry.guess end
+    if not entry.loaded then return nil end
+    for _, suffix in ipairs(GUESS) do
+        local f = _G[entry.name .. suffix]
+        if type(f) == "table" and f.SetParent and f.GetObjectType and f.GetNumPoints then
+            entry.guess = { name = entry.name, settings = { frame = entry.name .. suffix } }
+            return entry.guess
+        end
+    end
+    return nil
+end
+
+function NS.Spec(entry)
+    if entry.isHub then return nil end
+    local own = DrangedHubSpecs[entry.name]
+    if type(own) == "table" then return own end
+    if entry.toc == nil then entry.toc = TocSpec(entry.name) or false end
+    return entry.toc or builtin[entry.name] or Guess(entry)
+end
 
 local function Clean(text)
     if type(text) ~= "string" then return nil end
@@ -109,8 +211,7 @@ function NS.Scan()
                     version = GetMeta(name, "Version"),
                     icon = tonumber(icon) or icon or NS.LOGO,
                     loaded = IsLoaded(name) and true or false,
-                    tool = name:find("Probe$") ~= nil,
-                    spec = specs[name],
+                    tool = name:find("Probe$") ~= nil or Meta(name, "Tool") ~= nil,
                 }
                 list[#list + 1] = entry
                 byName[name] = entry
@@ -163,7 +264,7 @@ function NS.Minimap(entry)
         }
     end
     if not entry.loaded then return nil end
-    local spec = entry.spec
+    local spec = NS.Spec(entry)
     if spec and spec.minimap then return spec.minimap end
     if entry.mm then return entry.mm end
     local DBI = LibStub and LibStub("LibDBIcon-1.0", true)
@@ -288,7 +389,15 @@ loader:RegisterEvent("ADDON_LOADED")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(_, event, arg)
     if event == "ADDON_LOADED" then
-        if arg ~= ADDON then return end
+        if arg ~= ADDON then
+            -- an addon loaded on demand after login
+            local entry = NS.byName and NS.byName[arg]
+            if entry and not entry.loaded then
+                entry.loaded = true
+                if NS.RefreshWindow then NS.RefreshWindow() end
+            end
+            return
+        end
         DrangedAddonsDB = DrangedAddonsDB or {}
         NS.db = DrangedAddonsDB
         for k, v in pairs(DEFAULTS) do
